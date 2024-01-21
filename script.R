@@ -2,10 +2,16 @@
 # Anirudh Ravishankar
 # January, 2024
 
+
 # Libraries ---------------------------------------------------------------
 
 library(dplyr)
+library(ggplot2)
 library(readxl)
+
+# For survival models
+library(survival)
+library(bshazard)
 
 
 # Data Import and Cleaning ------------------------------------------------
@@ -62,10 +68,10 @@ df <- subset(df, select = -c(QN157A:QN157D))
 
 
 ## Rename variables for convenience ----
-names(df) <- c("id", "age", "sex", "hispanic", "native_indian", 
+names(df) <- c("id", "age", "male", "hispanic", "native_indian", 
                "asian", "black", "hawaii_pacific", "white", "social_media_use",
                "depressed", "no_of_cars", "own_bedroom", "school_grades", 
-               "cigarette_ever", "cigarette_age")
+               "cigarette_ever", "exit_age")
 
 
 ## Coding actual values of variables from codebook ----
@@ -86,29 +92,32 @@ df <- df %>%
                          age == 11 ~ 19, T ~ age))
 
 # Sex
-df <- subset(df, !is.na(sex)) # Removes additional 169 individuals
+df <- subset(df, !is.na(male)) # Removes additional 169 individuals
 df <- df %>% 
-  mutate(sex = case_when(sex == 1 ~ "Male", T ~ "Female"))
+  mutate(male = case_when(male == 1 ~ 1, T ~ 0))
+df$male <- as.factor(df$male)
 
 # Cigarette ever
 df <- subset(df, !is.na(cigarette_ever)) # Removes additional 245 individuals
 df <- df %>% 
   mutate(cigarette_ever = case_when(cigarette_ever == 1 ~ 1, T ~ 0))
 
-# Age of first cigarette use
+# Age of first cigarette use (or age at interview if never smoked)
 df <- df %>% 
-  mutate(cigarette_age = case_when(cigarette_age == 1 ~ 8,
-                                   cigarette_age == 2 ~ 9,
-                                   cigarette_age == 3 ~ 10,
-                                   cigarette_age == 4 ~ 11,
-                                   cigarette_age == 5 ~ 12,
-                                   cigarette_age == 6 ~ 13,
-                                   cigarette_age == 7 ~ 14,
-                                   cigarette_age == 8 ~ 15,
-                                   cigarette_age == 9 ~ 16,
-                                   cigarette_age == 10 ~ 17,
-                                   cigarette_age == 11 ~ 18,
-                                   cigarette_age == 12 ~ 19, T ~ cigarette_age))
+  mutate(exit_age = case_when(exit_age == 1 ~ 8,
+                                   exit_age == 2 ~ 9,
+                                   exit_age == 3 ~ 10,
+                                   exit_age == 4 ~ 11,
+                                   exit_age == 5 ~ 12,
+                                   exit_age == 6 ~ 13,
+                                   exit_age == 7 ~ 14,
+                                   exit_age == 8 ~ 15,
+                                   exit_age == 9 ~ 16,
+                                   exit_age == 10 ~ 17,
+                                   exit_age == 11 ~ 18,
+                                   exit_age == 12 ~ 19, T ~ exit_age))
+df <- df %>% 
+  mutate(exit_age = case_when(is.na(exit_age) ~ age, T ~ exit_age))
 
 # Social media use
 df <- subset(df, !is.na(social_media_use)) # Removes additional 1689 individuals
@@ -168,9 +177,38 @@ df <- subset(df, race != 0)
 df <- subset(df, select = -c(race))
 
 
+# Survival curves ---------------------------------------------------------
 
+# Smoothed hazard curve (change smoothing parameter lambda as per convenience)
+fit <- bshazard(Surv(exit_age, cigarette_ever) ~ 1, verbose = F, lambda = 1000, df)
+df_surv <- data.frame(time = fit$time, hazard = fit$hazard, 
+                      lower.ci = fit$lower.ci, upper.ci = fit$upper.ci)
+ggplot(df_surv, aes(time, hazard)) +
+  geom_line(color = "purple") +
+  geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci), alpha = 0.2,
+              fill = "pink3") +
+  theme_classic(base_size = 14) +
+  xlab("Age in Years") +
+  ylab("Hazard") +
+  scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(5, 20)) +
+  scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
-
+# Hazard by sex
+as.data.frame.bshazard <- function(x, ...) {
+  with(x, data.frame(time, hazard, lower.ci, upper.ci))
+}
+df_surv <- group_by(df, male) %>%
+  do(as.data.frame(bshazard(Surv(exit_age, cigarette_ever) ~ 1, data = ., verbose = F, lambda = 1000))) %>%
+  ungroup()
+ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = male)) +
+  geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci, fill = male), alpha = 0.3) +
+  labs(color = "", x = "Age in Years", y = "Hazard") +
+  theme_classic(base_size = 14) +
+  scale_color_hue(labels = c("Female", "Male")) +
+  guides(fill = "none") +
+  theme(legend.position = c(0.2, 0.9)) +
+  scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(5, 20)) +
+  scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
 
 
