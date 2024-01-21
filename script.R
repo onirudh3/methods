@@ -2,20 +2,21 @@
 # Anirudh Ravishankar
 # January, 2024
 
-# Libraries and data ------------------------------------------------------
+# Libraries ---------------------------------------------------------------
 
 library(dplyr)
 library(readxl)
+
+
+# Data Import and Cleaning ------------------------------------------------
 
 # NYTS 2022 Data (takes about 70 seconds to load on my system)
 #
 # QN1: Age at interview
 # QN2: Sex
-# QN3: Grade
 #
-# Race -
-# QN4A: Not Hispanic
-# QN4B, C, D, E: Yes Hispanic
+# Ethnicity -
+# QN4B, C, D, E: Hispanic
 # QN5A: American Indian or Alaska Native
 # QN5B: Asian
 # QN5C: Black
@@ -24,42 +25,158 @@ library(readxl)
 #
 # Interesting covariates -
 # QN133: How often you use social media?
-# QN155: Sexuality?
-# QN156: Transgender?
 # QN157A, B, C, D: No interest in life, feeling down/depressed/hopeless, etc.
 # QN161: Wealth. Does family own cars?
 # QN162: Wealth. Do you have your own bedroom?
 # QN165: School grades currently
 #
-# E-Cigarettes -
-# QN6: Ever used?
-# QN7: First age of use.
-#
 # Cigarettes -
 # QN35: Ever smoked?
 # QN36: First age of use.
-#
-# Cigar -
-# QN51: Ever smoked?
-# QN52: First age of use.
-#
-# Chewing Tobacco/Snuff/Dip -
-# QN62: Ever used?
-# QN63: First age of use.
-#
-# Tobacco in hookah -
-# QN67: Ever used?
-# QN68: First age of use.
 
 df <- read_excel("nyts2022.xlsx") %>%
-  select(c("newid", "QN1", "QN2", "QN3", "QN4A", "QN4B", "QN4C", "QN4D", "QN4E",
-           "QN5A", "QN5B", "QN5C", "QND", "QN5E", "QN133", "QN155", "QN156",
-           "QN157A", "QN157B", "QN157C", "QN157D", "QN161", "QN162", "QN165",
-           "QN6", "QN7", "QN35", "QN36", "QN51", "QN52", "QN62", "QN63", "QN67",
-           "Qn68"))
+  select(c("newid", "QN1", "QN2", "QN4B", "QN4C", "QN4D", "QN4E",
+           "QN5A", "QN5B", "QN5C", "QN5D", "QN5E", "QN133", "QN157A", 
+           "QN157B", "QN157C", "QN157D", "QN161", "QN162", "QN165", "QN35", 
+           "QN36"))
+
+# How many individuals in raw data?
+n_distinct(df$newid) # 28291 individuals
 
 
-# Rename variables --------------------------------------------------------
+## Consolidate some variables ----
+
+# Hispanic dummy
+df <- df %>% 
+  mutate(hispanic = rowSums(!is.na(select(., QN4B:QN4E))), .after = QN4E)
+df <- df %>% 
+  mutate(hispanic = case_when(hispanic == 0 ~ 0, T ~ 1))
+df <- subset(df, select = -c(QN4B:QN4E))
+
+# Feeling depressed dummy
+df <- df %>% 
+  mutate(depressed = rowSums(!is.na(select(., QN157A:QN157D))), .after = QN157D)
+df <- df %>% 
+  mutate(depressed = case_when(depressed == 0 ~ 0, T ~ 1))
+df <- subset(df, select = -c(QN157A:QN157D))
+
+
+## Rename variables for convenience ----
+names(df) <- c("id", "age", "sex", "hispanic", "native_indian", 
+               "asian", "black", "hawaii_pacific", "white", "social_media_use",
+               "depressed", "no_of_cars", "own_bedroom", "school_grades", 
+               "cigarette_ever", "cigarette_age")
+
+
+## Coding actual values of variables from codebook ----
+
+# Age
+df <- subset(df, !is.na(age)) # Removes 100 individuals
+df <- df %>% 
+  mutate(age = case_when(age == 1 ~ 9,
+                         age == 2 ~ 10,
+                         age == 3 ~ 11,
+                         age == 4 ~ 12,
+                         age == 5 ~ 13,
+                         age == 6 ~ 14,
+                         age == 7 ~ 15,
+                         age == 8 ~ 16,
+                         age == 9 ~ 17,
+                         age == 10 ~ 18,
+                         age == 11 ~ 19, T ~ age))
+
+# Sex
+df <- subset(df, !is.na(sex)) # Removes additional 169 individuals
+df <- df %>% 
+  mutate(sex = case_when(sex == 1 ~ "Male", T ~ "Female"))
+
+# Cigarette ever
+df <- subset(df, !is.na(cigarette_ever)) # Removes additional 245 individuals
+df <- df %>% 
+  mutate(cigarette_ever = case_when(cigarette_ever == 1 ~ 1, T ~ 0))
+
+# Age of first cigarette use
+df <- df %>% 
+  mutate(cigarette_age = case_when(cigarette_age == 1 ~ 8,
+                                   cigarette_age == 2 ~ 9,
+                                   cigarette_age == 3 ~ 10,
+                                   cigarette_age == 4 ~ 11,
+                                   cigarette_age == 5 ~ 12,
+                                   cigarette_age == 6 ~ 13,
+                                   cigarette_age == 7 ~ 14,
+                                   cigarette_age == 8 ~ 15,
+                                   cigarette_age == 9 ~ 16,
+                                   cigarette_age == 10 ~ 17,
+                                   cigarette_age == 11 ~ 18,
+                                   cigarette_age == 12 ~ 19, T ~ cigarette_age))
+
+# Social media use
+df <- subset(df, !is.na(social_media_use)) # Removes additional 1689 individuals
+df$social_media_use <- as.factor(df$social_media_use)
+df <- df %>% 
+  mutate(social_media_use = case_when(social_media_use %in% c(1) ~ "Never",
+                                      social_media_use %in% c(2, 3, 4) ~ "Weekly",
+                                      social_media_use %in% c(5, 6, 7, 8) ~ "Daily",
+                                      T ~ social_media_use))
+
+# No. of cars
+df <- subset(df, !is.na(no_of_cars)) # Removes additional 1111 individuals
+df$no_of_cars <- as.factor(df$no_of_cars)
+df <- df %>% 
+  mutate(no_of_cars = case_when(no_of_cars == 1 ~ "0",
+                                no_of_cars == 2 ~ "1",
+                                no_of_cars == 3 ~ ">=2", T ~ no_of_cars))
+
+# Own bedroom
+df <- subset(df, !is.na(own_bedroom)) # Removes additional 82 individuals
+df <- df %>% 
+  mutate(own_bedroom = case_when(own_bedroom == 1 ~ 0, T ~ 1))
+
+# Current school grades
+df <- subset(df, !is.na(school_grades)) # Removes additional 216 individuals
+df$school_grades <- as.factor(df$school_grades)
+df <- df %>% 
+  mutate(school_grades = case_when(school_grades == 1 ~ "Mostly A's",
+                                   school_grades == 2 ~ "Mostly B's",
+                                   school_grades == 3 ~ "Mostly C's",
+                                   school_grades == 4 ~ "Mostly D's",
+                                   school_grades == 5 ~ "Mostly F's",
+                                   school_grades == 6 ~ "None of these",
+                                   school_grades == 7 ~ "Not sure", 
+                                   T ~ school_grades))
+
+
+## Some more cleaning ----
+
+# Ethnicity variables
+df <- df %>% 
+  mutate(native_indian = case_when(is.na(native_indian) ~ 0, T ~ native_indian))
+df <- df %>% 
+  mutate(asian = case_when(is.na(asian) ~ 0, T ~ asian))
+df <- df %>% 
+  mutate(black = case_when(is.na(black) ~ 0, T ~ black))
+df <- df %>% 
+  mutate(hawaii_pacific = case_when(is.na(hawaii_pacific) ~ 0, 
+                                    T ~ hawaii_pacific))
+df <- df %>% 
+  mutate(white = case_when(is.na(white) ~ 0, T ~ white))
+
+# Remove additional 197 individuals without any information about ethnicity
+df <- df %>% 
+  mutate(race = rowSums((select(., hispanic:white))), .after = white)
+df <- subset(df, race != 0)
+df <- subset(df, select = -c(race))
+
+
+
+
+
+
+
+
+
+
+
 
 
 
