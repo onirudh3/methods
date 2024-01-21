@@ -1,1 +1,1 @@
-Studying smoking hazards using duration models.
+Studying smoking hazards using a split population duration model.
