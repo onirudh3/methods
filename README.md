@@ -1,1 +1,1 @@
-My project for econometric methods in empirical economics.
+Studying smoking hazards using duration models.
