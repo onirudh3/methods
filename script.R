@@ -8,11 +8,14 @@
 library(dplyr)
 library(ggplot2)
 library(readxl)
+library(tidyr)
 
 # For survival models
 library(survival)
 library(bshazard)
 
+# Split population duration model
+library(spduration)
 
 # Data Import and Cleaning ------------------------------------------------
 
@@ -34,7 +37,7 @@ library(bshazard)
 # QN157A, B, C, D: No interest in life, feeling down/depressed/hopeless, etc.
 # QN161: Wealth. Does family own cars?
 # QN162: Wealth. Do you have your own bedroom?
-# QN165: School grades currently
+# QN165: School grades currently.
 #
 # Cigarettes -
 # QN35: Ever smoked?
@@ -75,6 +78,9 @@ names(df) <- c("id", "age", "male", "hispanic", "native_indian",
 
 
 ## Coding actual values of variables from codebook ----
+
+# ID
+df$id <- as.factor(df$id)
 
 # Age
 df <- subset(df, !is.na(age)) # Removes 100 individuals
@@ -174,10 +180,18 @@ df <- df %>%
 df <- df %>% 
   mutate(race = rowSums((select(., hispanic:white))), .after = white)
 df <- subset(df, race != 0)
+
+# How many people report more than one ethnicity?
+# plyr::count(df$race) # Install `plyr` package if necessary
 df <- subset(df, select = -c(race))
 
 
-# Survival curves ---------------------------------------------------------
+# Summary Statistics ------------------------------------------------------
+
+
+
+
+# Survival Curves ---------------------------------------------------------
 
 # Smoothed hazard curve (change smoothing parameter lambda as per convenience)
 fit <- bshazard(Surv(exit_age, cigarette_ever) ~ 1, verbose = F, lambda = 1000, df)
@@ -211,10 +225,99 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
   scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
 
+# Reformat Data for Split Population Model --------------------------------
+
+# For row splits, we need id, age, cigarette_ever, and the exit_age
+df1 <- df[c("id", "cigarette_ever", "age", "exit_age")]
+
+# Creating the row splits
+df1 <- df1 %>%
+  mutate(start = 0, end = age) %>%
+  select(-cigarette_ever) %>%
+  gather(cigarette_ever, enter, -id) %>%
+  group_by(id) %>%
+  arrange(id, enter) %>%
+  filter(!is.na(enter)) %>%
+  mutate(exit = lead(enter)) %>%
+  filter(!is.na(exit), !grepl("time_to_event_out_start", cigarette_ever)) %>%
+  mutate(event = lead(grepl("time_to_event", cigarette_ever), default = 0)) %>%
+  select(id, enter, exit, event) %>%
+  ungroup()
+
+# Cleaning up
+df1 <- subset(df1, enter != exit)
+df1 <- left_join(df1, select(df, id:school_grades), by = "id") # Add all columns
+
+# Indicator for cigarette ever
+df1$event <- ifelse(df1$exit == df1$age, 0, 1)
+
+# How many people smoke the first time at age of interview?
+nrow(subset(df, age == exit_age & cigarette_ever == 1)) # 314 people
+id_vector <- subset(df, age == exit_age & cigarette_ever == 1) %>% 
+  distinct(id) %>% 
+  pull() # Get the id's of these 314 individuals
+df1 <- df1 %>% 
+  mutate(event = case_when(id %in% id_vector ~ 1, T ~ event)) 
+
+# Re-formatted with one year intervals
+df1 <- survSplit(df1, cut = c(1:80), start = "enter", end = "exit",
+                event = "event")
+
+# Relocate some columns
+df1 <- df1 %>% relocate(c(enter, exit, event), .after = age)
 
 
+# Split Population Model using `spduration` -------------------------------
 
+## Variables to capture survival characteristics, needed by `spduration` ----
 
+# At risk
+df1 <- df1 %>% 
+  group_by(id) %>% 
+  mutate(atrisk = case_when(sum(event) > 0 ~ 1, T ~ 0))
 
+# Failure
+df1 <- df1 %>% 
+  mutate(failure = event) # Same as event
 
+# End of spell
+df1 <- df1 %>% 
+  mutate(end.spell = if_else(row_number() == n(), 1, 0))
 
+# t.0
+df1 <- df1 %>% 
+  mutate(t.0 = enter) # Same as enter
+
+## The model ----
+
+# Split data 
+id_vector <- df %>% 
+  distinct(id) %>% 
+  pull() # Recycling this vector
+
+# Sampling a third of the population, following Schmidt and Witte (1989)
+a <- sample(id_vector, 8167)
+
+# Training sample
+df_train <- subset(df1, id %in% a)
+
+# Test sample
+df_test <- subset(df1, !(id %in% a))
+
+# Log-log model
+loglog_model <- spdur(
+  exit ~ male + hispanic + native_indian + asian + black + hawaii_pacific + 
+    white + social_media_use + depressed + no_of_cars + own_bedroom + school_grades,
+  atrisk ~ male + hispanic + native_indian + asian + black + hawaii_pacific + 
+    white + social_media_use + depressed + no_of_cars + own_bedroom + school_grades,
+  data = df1, distr = "loglog", silent = TRUE)
+
+# Hazard plot
+plot(loglog_model, type="hazard", main="Loglog")
+
+# Prediction
+loglog_test_p <- predict(loglog_model, newdata = coup_test, na.action = na.omit)
+
+# Separation plot
+obs_y <- coup_test[complete.cases(coup_test), "coup"]
+separationplot(loglog_test_p, obs_y, newplot = FALSE)
