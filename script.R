@@ -16,6 +16,7 @@ library(bshazard)
 
 # Split population duration model
 library(spduration)
+library(separationplot)
 
 # Data Import and Cleaning ------------------------------------------------
 
@@ -269,37 +270,36 @@ df1 <- df1 %>% relocate(c(enter, exit, event), .after = age)
 
 # Split Population Model using `spduration` -------------------------------
 
-# Variables to capture survival characteristics, needed by `spduration`
-system.time(df_train <- add_duration(df_train, "event", unitID = "id", tID = "exit", freq = "year"))
-
-# Split data 
+# Sampling a tenth of the population, to ease computation
 id_vector <- df %>% 
   distinct(id) %>% 
-  pull() # Recycling this vector
+  pull() # Recycling this vector of id's
+a <- sample(id_vector, n_distinct(id_vector) / 10)
+df_model <- subset(df1, id %in% a)
 
-# Sampling a third of the population, following Schmidt and Witte (1989)
-a <- sample(id_vector, 500)
+# Variables to capture survival characteristics, needed by `spduration` (Takes about 45 seconds)
+system.time(df_model <- add_duration(df_model, "event", unitID = "id", tID = "exit", freq = "year"))
 
-# Training sample
-df_train <- subset(df1, id %in% a)
-
-# Test sample
-df_test <- subset(df1, !(id %in% a))
+# Splitting a third of the sample, following Schmidt and Witte (1989)
+b <- sample(a, n_distinct(a) / 3)
+df_train <- subset(df_model, id %in% b) # Training sample
+df_test <- subset(df_model, !(id %in% b)) # Test sample
 
 # Log-log model
 loglog_model <- spdur(
-  duration ~ male + hispanic + native_indian + asian + black + hawaii_pacific,
-  atrisk ~ male + hispanic + native_indian + asian + black + hawaii_pacific,
+  duration ~ male + black,
+  atrisk ~ male + black,
   data = df_train, distr = "loglog", silent = T)
 
+# Model summary
 summary(loglog_model)
 
 # Hazard plot
-plot(loglog_model, type="hazard", main="Loglog")
+plot(loglog_model, type = "hazard", main = "Loglog")
 
 # Prediction
-loglog_test_p <- predict(loglog_model, newdata = coup_test, na.action = na.omit)
+loglog_test_p <- predict(loglog_model, newdata = df_test, na.action = na.omit)
 
 # Separation plot
-obs_y <- coup_test[complete.cases(coup_test), "coup"]
-separationplot(loglog_test_p, obs_y, newplot = FALSE)
+obs_y <- df_test[complete.cases(df_test), "event"]
+separationplot(loglog_test_p, obs_y, newplot = F)
