@@ -226,7 +226,7 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
   scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
 
-# Reformat Data for Split Population Model --------------------------------
+# Reformat Data for Models ------------------------------------------------
 
 # For row splits, we need id, age, cigarette_ever, and the exit_age
 df1 <- df[c("id", "cigarette_ever", "age", "exit_age")]
@@ -287,8 +287,8 @@ df_test <- subset(df_model, !(id %in% b)) # Test sample
 
 # Log-log model
 loglog_model <- spdur(
-  duration ~ male + black,
-  atrisk ~ male + black,
+  duration ~ male + black + no_of_cars + own_bedroom,
+  atrisk ~ male + black + social_media_use + depressed + no_of_cars + own_bedroom + school_grades,
   data = df_train, distr = "loglog", silent = T)
 
 # Model summary
@@ -297,7 +297,7 @@ summary(loglog_model)
 # Hazard plot
 plot(loglog_model, type = "hazard", main = "Loglog")
 
-# Prediction
+# Prediction on test sample
 loglog_test_p <- predict(loglog_model, newdata = df_test, na.action = na.omit)
 
 # Separation plot
