@@ -252,14 +252,14 @@ df1 <- left_join(df1, select(df, id:school_grades), by = "id") # Add all columns
 df1$event <- ifelse(df1$exit == df1$age, 0, 1)
 
 # How many people smoke the first time at age of interview?
-nrow(subset(df, age == exit_age & cigarette_ever == 1)) # 314 people
+nrow(subset(df, age == exit_age & cigarette_ever == 1)) # 314 individuals
 id_vector <- subset(df, age == exit_age & cigarette_ever == 1) %>% 
   distinct(id) %>% 
   pull() # Get the id's of these 314 individuals
 df1 <- df1 %>% 
   mutate(event = case_when(id %in% id_vector ~ 1, T ~ event)) 
 
-# Re-formatted with one year intervals
+# Reformat with one year intervals
 df1 <- survSplit(df1, cut = c(1:80), start = "enter", end = "exit",
                 event = "event")
 
@@ -269,26 +269,8 @@ df1 <- df1 %>% relocate(c(enter, exit, event), .after = age)
 
 # Split Population Model using `spduration` -------------------------------
 
-## Variables to capture survival characteristics, needed by `spduration` ----
-
-# At risk
-df1 <- df1 %>% 
-  group_by(id) %>% 
-  mutate(atrisk = case_when(sum(event) > 0 ~ 1, T ~ 0))
-
-# Failure
-df1 <- df1 %>% 
-  mutate(failure = event) # Same as event
-
-# End of spell
-df1 <- df1 %>% 
-  mutate(end.spell = if_else(row_number() == n(), 1, 0))
-
-# t.0
-df1 <- df1 %>% 
-  mutate(t.0 = enter) # Same as enter
-
-## The model ----
+# Variables to capture survival characteristics, needed by `spduration`
+system.time(df_train <- add_duration(df_train, "event", unitID = "id", tID = "exit", freq = "year"))
 
 # Split data 
 id_vector <- df %>% 
@@ -296,7 +278,7 @@ id_vector <- df %>%
   pull() # Recycling this vector
 
 # Sampling a third of the population, following Schmidt and Witte (1989)
-a <- sample(id_vector, 8167)
+a <- sample(id_vector, 500)
 
 # Training sample
 df_train <- subset(df1, id %in% a)
@@ -306,11 +288,11 @@ df_test <- subset(df1, !(id %in% a))
 
 # Log-log model
 loglog_model <- spdur(
-  exit ~ male + hispanic + native_indian + asian + black + hawaii_pacific + 
-    white + social_media_use + depressed + no_of_cars + own_bedroom + school_grades,
-  atrisk ~ male + hispanic + native_indian + asian + black + hawaii_pacific + 
-    white + social_media_use + depressed + no_of_cars + own_bedroom + school_grades,
-  data = df1, distr = "loglog", silent = TRUE)
+  duration ~ male + hispanic + native_indian + asian + black + hawaii_pacific,
+  atrisk ~ male + hispanic + native_indian + asian + black + hawaii_pacific,
+  data = df_train, distr = "loglog", silent = T)
+
+summary(loglog_model)
 
 # Hazard plot
 plot(loglog_model, type="hazard", main="Loglog")
