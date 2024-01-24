@@ -9,14 +9,16 @@ library(dplyr)
 library(ggplot2)
 library(readxl)
 library(tidyr)
+library(bshazard) # Hazard plots
 
-# For survival models
+# Proportional hazards models
 library(survival)
-library(bshazard)
+library(coxme)
 
 # Split population duration model
 library(spduration)
 library(separationplot)
+
 
 # Data Import and Cleaning ------------------------------------------------
 
@@ -45,7 +47,7 @@ library(separationplot)
 # QN36: First age of use.
 
 df <- read_excel("nyts2022.xlsx") %>%
-  select(c("newid", "QN1", "QN2", "QN4B", "QN4C", "QN4D", "QN4E",
+  dplyr::select(c("newid", "QN1", "QN2", "QN4B", "QN4C", "QN4D", "QN4E",
            "QN5A", "QN5B", "QN5C", "QN5D", "QN5E", "QN133", "QN157A", 
            "QN157B", "QN157C", "QN157D", "QN161", "QN162", "QN165", "QN35", 
            "QN36"))
@@ -58,14 +60,14 @@ n_distinct(df$newid) # 28291 individuals
 
 # Hispanic dummy
 df <- df %>% 
-  mutate(hispanic = rowSums(!is.na(select(., QN4B:QN4E))), .after = QN4E)
+  mutate(hispanic = rowSums(!is.na(dplyr::select(., QN4B:QN4E))), .after = QN4E)
 df <- df %>% 
   mutate(hispanic = case_when(hispanic == 0 ~ 0, T ~ 1))
 df <- subset(df, select = -c(QN4B:QN4E))
 
 # Feeling depressed dummy
 df <- df %>% 
-  mutate(depressed = rowSums(!is.na(select(., QN157A:QN157D))), .after = QN157D)
+  mutate(depressed = rowSums(!is.na(dplyr::select(., QN157A:QN157D))), .after = QN157D)
 df <- df %>% 
   mutate(depressed = case_when(depressed == 0 ~ 0, T ~ 1))
 df <- subset(df, select = -c(QN157A:QN157D))
@@ -97,6 +99,10 @@ df <- df %>%
                          age == 9 ~ 17,
                          age == 10 ~ 18,
                          age == 11 ~ 19, T ~ age))
+
+# Age squared (re-scaled)
+df <- df %>% 
+  mutate(agesq = (age ^ 2) / 100, .after = age)
 
 # Sex
 df <- subset(df, !is.na(male)) # Removes additional 169 individuals
@@ -134,6 +140,7 @@ df <- df %>%
                                       social_media_use %in% c(2, 3, 4) ~ "Weekly",
                                       social_media_use %in% c(5, 6, 7, 8) ~ "Daily",
                                       T ~ social_media_use))
+df$social_media_use <- factor(df$social_media_use, levels = c("Never", "Weekly", "Daily"))
 
 # No. of cars
 df <- subset(df, !is.na(no_of_cars)) # Removes additional 1111 individuals
@@ -142,24 +149,21 @@ df <- df %>%
   mutate(no_of_cars = case_when(no_of_cars == 1 ~ "0",
                                 no_of_cars == 2 ~ "1",
                                 no_of_cars == 3 ~ ">=2", T ~ no_of_cars))
+df$no_of_cars <- factor(df$no_of_cars, levels = c("0", "1", ">=2"))
 
 # Own bedroom
 df <- subset(df, !is.na(own_bedroom)) # Removes additional 82 individuals
 df <- df %>% 
   mutate(own_bedroom = case_when(own_bedroom == 1 ~ 0, T ~ 1))
+df$own_bedroom <- as.factor(df$own_bedroom)
 
 # Current school grades
-df <- subset(df, !is.na(school_grades)) # Removes additional 216 individuals
+df <- subset(df, !is.na(school_grades)) # Removes additional 197 individuals
 df$school_grades <- as.factor(df$school_grades)
-df <- df %>% 
-  mutate(school_grades = case_when(school_grades == 1 ~ "Mostly A's",
-                                   school_grades == 2 ~ "Mostly B's",
-                                   school_grades == 3 ~ "Mostly C's",
-                                   school_grades == 4 ~ "Mostly D's",
-                                   school_grades == 5 ~ "Mostly F's",
-                                   school_grades == 6 ~ "None of these",
-                                   school_grades == 7 ~ "Not sure", 
-                                   T ~ school_grades))
+df <- subset(df, !(school_grades %in% c(6, 7))) # Removes additional 1843 individuals with no information about grades
+df <- df %>% mutate(school_grades = case_when(school_grades %in% c(1, 2) ~ "High",
+                                              T ~ "Low"))
+df$school_grades <- factor(df$school_grades, levels = c("High", "Low"))
 
 
 ## Some more cleaning ----
@@ -177,9 +181,9 @@ df <- df %>%
 df <- df %>% 
   mutate(white = case_when(is.na(white) ~ 0, T ~ white))
 
-# Remove additional 197 individuals without any information about ethnicity
+# Remove additional 165 individuals without any information about ethnicity
 df <- df %>% 
-  mutate(race = rowSums((select(., hispanic:white))), .after = white)
+  mutate(race = rowSums((dplyr::select(., hispanic:white))), .after = white)
 df <- subset(df, race != 0)
 
 # How many people report more than one ethnicity?
@@ -226,7 +230,17 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
   scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
 
-# Reformat Data for Models ------------------------------------------------
+# Proportional Hazards Model ----------------------------------------------
+
+cox_model <- coxph(Surv(exit_age, cigarette_ever) ~ male + age + agesq + black +
+                     social_media_use + depressed + no_of_cars + own_bedroom + 
+                     school_grades, data = df)
+
+# Model summary
+summary(cox_model)
+
+
+# Reformat Data for Split Population Model --------------------------------
 
 # For row splits, we need id, age, cigarette_ever, and the exit_age
 df1 <- df[c("id", "cigarette_ever", "age", "exit_age")]
@@ -234,7 +248,7 @@ df1 <- df[c("id", "cigarette_ever", "age", "exit_age")]
 # Creating the row splits
 df1 <- df1 %>%
   mutate(start = 0, end = age) %>%
-  select(-cigarette_ever) %>%
+  dplyr::select(-cigarette_ever) %>%
   gather(cigarette_ever, enter, -id) %>%
   group_by(id) %>%
   arrange(id, enter) %>%
@@ -242,12 +256,12 @@ df1 <- df1 %>%
   mutate(exit = lead(enter)) %>%
   filter(!is.na(exit), !grepl("time_to_event_out_start", cigarette_ever)) %>%
   mutate(event = lead(grepl("time_to_event", cigarette_ever), default = 0)) %>%
-  select(id, enter, exit, event) %>%
+  dplyr::select(id, enter, exit, event) %>%
   ungroup()
 
 # Cleaning up
 df1 <- subset(df1, enter != exit)
-df1 <- left_join(df1, select(df, id:school_grades), by = "id") # Add all columns
+df1 <- left_join(df1, dplyr::select(df, id:school_grades), by = "id") # Add all columns
 
 # Indicator for cigarette ever
 df1$event <- ifelse(df1$exit == df1$age, 0, 1)
@@ -274,21 +288,23 @@ df1 <- df1 %>% relocate(c(enter, exit, event), .after = age)
 id_vector <- df %>% 
   distinct(id) %>% 
   pull() # Recycling this vector of id's
+set.seed(5)
 a <- sample(id_vector, n_distinct(id_vector) / 10)
 df_model <- subset(df1, id %in% a)
 
-# Variables to capture survival characteristics, needed by `spduration` (Takes about 45 seconds)
+# Variables to capture survival characteristics, needed by `spduration` (takes about 45 seconds)
 system.time(df_model <- add_duration(df_model, "event", unitID = "id", tID = "exit", freq = "year"))
 
 # Splitting a third of the sample, following Schmidt and Witte (1989)
+set.seed(5)
 b <- sample(a, n_distinct(a) / 3)
 df_train <- subset(df_model, id %in% b) # Training sample
 df_test <- subset(df_model, !(id %in% b)) # Test sample
 
 # Log-log model
 loglog_model <- spdur(
-  duration ~ male + black + no_of_cars + own_bedroom,
-  atrisk ~ male + black + social_media_use + depressed + no_of_cars + own_bedroom + school_grades,
+  duration ~ male + age + agesq + black + social_media_use + no_of_cars + school_grades,
+  atrisk ~ male + age + agesq + black + social_media_use + no_of_cars + school_grades,
   data = df_train, distr = "loglog", silent = T)
 
 # Model summary
