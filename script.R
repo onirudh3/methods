@@ -9,11 +9,11 @@ library(dplyr)
 library(ggplot2)
 library(readxl)
 library(tidyr)
+library(ggfortify) # Survival plots
 library(bshazard) # Hazard plots
 
 # Proportional hazards models
 library(survival)
-library(coxme)
 
 # Split population duration model
 library(spduration)
@@ -198,6 +198,24 @@ df <- subset(df, select = -c(race))
 
 # Survival Curves ---------------------------------------------------------
 
+# Survival curve
+fit <- survfit(Surv(exit_age, cigarette_ever) ~ 1, df, conf.type = "log-log")
+autoplot(fit, censor.shape = '|', censor.colour = "orange2", surv.colour = "pink3") +
+  theme_classic(base_size = 14) +
+  xlab("Age in Years") +
+  ylab("Percentage Never Smoked Cigarette") +
+  scale_x_continuous(breaks = seq(0, 50, 1), expand = c(0, 0), limits = c(0, 20))
+
+# Survival by sex
+fit <- survfit(Surv(exit_age, cigarette_ever) ~ male, df, conf.type = "log-log")
+autoplot(fit) +
+  scale_color_hue(labels = c("Female", "Male")) +
+  theme_classic(base_size = 14) +
+  guides(fill = "none") +
+  theme(legend.position = c(0.2, 0.3)) +
+  labs(color = "", x = "Age in Years", y = "Percentage Never Smoked Cigarette") +
+  scale_x_continuous(breaks = seq(0, 50, 1), expand = c(0, 0), limits = c(0, 20))
+
 # Smoothed hazard curve (change smoothing parameter lambda as per convenience)
 fit <- bshazard(Surv(exit_age, cigarette_ever) ~ 1, verbose = F, lambda = 1000, df)
 df_surv <- data.frame(time = fit$time, hazard = fit$hazard, 
@@ -209,7 +227,7 @@ ggplot(df_surv, aes(time, hazard)) +
   theme_classic(base_size = 14) +
   xlab("Age in Years") +
   ylab("Hazard") +
-  scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(5, 20)) +
+  scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(0, 20)) +
   scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
 # Hazard by sex
@@ -226,13 +244,13 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
   scale_color_hue(labels = c("Female", "Male")) +
   guides(fill = "none") +
   theme(legend.position = c(0.2, 0.9)) +
-  scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(5, 20)) +
+  scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(0, 20)) +
   scale_y_continuous(breaks = seq(0, 100, 0.01), expand = c(0, 0), limits = c(0, 0.06))
 
 
 # Proportional Hazards Model ----------------------------------------------
 
-cox_model <- coxph(Surv(exit_age, cigarette_ever) ~ male + age + agesq + black +
+cox_model <- coxph(Surv(exit_age, cigarette_ever) ~ male + black +
                      social_media_use + depressed + no_of_cars + own_bedroom + 
                      school_grades, data = df)
 
@@ -303,8 +321,8 @@ df_test <- subset(df_model, !(id %in% b)) # Test sample
 
 # Log-log model
 loglog_model <- spdur(
-  duration ~ male + age + agesq + black + social_media_use + no_of_cars + school_grades,
-  atrisk ~ male + age + agesq + black + social_media_use + no_of_cars + school_grades,
+  duration ~ male + black + social_media_use + no_of_cars + school_grades,
+  atrisk ~ male + black + social_media_use + no_of_cars + school_grades,
   data = df_train, distr = "loglog", silent = T)
 
 # Model summary
