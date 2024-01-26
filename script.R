@@ -14,6 +14,7 @@ library(bshazard) # Hazard plots
 
 # Proportional hazards models
 library(survival)
+library(eha)
 
 # Split population duration model
 library(spduration)
@@ -62,7 +63,8 @@ n_distinct(df$newid) # 28291 individuals
 df <- df %>% 
   mutate(hispanic = rowSums(!is.na(dplyr::select(., QN4B:QN4E))), .after = QN4E)
 df <- df %>% 
-  mutate(hispanic = case_when(hispanic == 0 ~ 0, T ~ 1))
+  mutate(hispanic = case_when(hispanic != 0 ~ "Hispanic", T ~ NA))
+df$hispanic <- as.factor(df$hispanic)
 df <- subset(df, select = -c(QN4B:QN4E))
 
 # Feeling depressed dummy
@@ -166,33 +168,40 @@ df <- df %>% mutate(school_grades = case_when(school_grades %in% c(1, 2) ~ "High
 df$school_grades <- factor(df$school_grades, levels = c("High", "Low"))
 
 
-## Some more cleaning ----
+## Ethnicity variables ----
 
-# Ethnicity variables
+# Some more cleaning
+df$native_indian <- as.factor(df$native_indian)
 df <- df %>% 
-  mutate(native_indian = case_when(is.na(native_indian) ~ 0, T ~ native_indian))
+  mutate(native_indian = case_when(!is.na(native_indian) ~ "Native Indian", T ~ native_indian))
+df$asian <- as.factor(df$asian)
 df <- df %>% 
-  mutate(asian = case_when(is.na(asian) ~ 0, T ~ asian))
+  mutate(asian = case_when(!is.na(asian) ~ "Asian", T ~ asian))
+df$black <- as.factor(df$black)
 df <- df %>% 
-  mutate(black = case_when(is.na(black) ~ 0, T ~ black))
+  mutate(black = case_when(!is.na(black) ~ "Black", T ~ black))
+df$hawaii_pacific <- as.factor(df$hawaii_pacific)
 df <- df %>% 
-  mutate(hawaii_pacific = case_when(is.na(hawaii_pacific) ~ 0, 
+  mutate(hawaii_pacific = case_when(!is.na(hawaii_pacific) ~ "Hawaii/Pacific", 
                                     T ~ hawaii_pacific))
+df$white <- as.factor(df$white)
 df <- df %>% 
-  mutate(white = case_when(is.na(white) ~ 0, T ~ white))
+  mutate(white = case_when(!is.na(white) ~ "White", T ~ white))
 
-# Remove additional 165 individuals without any information about ethnicity
+# How many individuals report multiple ethnicity?
 df <- df %>% 
-  mutate(race = rowSums((dplyr::select(., hispanic:white))), .after = white)
-df <- subset(df, race != 0)
+  mutate(ethnicity = rowSums(!is.na(dplyr::select(., hispanic:white))), .after = white)
+count(df, ethnicity)
 
-# How many people report more than one ethnicity?
-# plyr::count(df$race) # Install `plyr` package if necessary
-df <- subset(df, select = -c(race))
+# Remove the 165 individuals without any information about ethnicity
+df <- subset(df, ethnicity != 0)
 
-
-# Summary Statistics ------------------------------------------------------
-
+# Consolidate into one variable
+df <- df %>% 
+  pivot_longer(hispanic:white) %>% 
+  mutate(ethnicity = ifelse(sum(is.na(value)) == 5, value[!is.na(value)], "Mixed"), .by = id, .after = male) %>% 
+  pivot_wider() %>% 
+  subset(select = -c(hispanic:white))
 
 
 
@@ -217,7 +226,7 @@ autoplot(fit) +
   scale_x_continuous(breaks = seq(0, 50, 1), expand = c(0, 0), limits = c(0, 20))
 
 # Smoothed hazard curve (change smoothing parameter lambda as per convenience)
-fit <- bshazard(Surv(exit_age, cigarette_ever) ~ 1, verbose = F, lambda = 1000, df)
+fit <- bshazard(Surv(exit_age, cigarette_ever) ~ 1, verbose = F, lambda = 100, df)
 df_surv <- data.frame(time = fit$time, hazard = fit$hazard, 
                       lower.ci = fit$lower.ci, upper.ci = fit$upper.ci)
 ggplot(df_surv, aes(time, hazard)) +
@@ -235,7 +244,7 @@ as.data.frame.bshazard <- function(x, ...) {
   with(x, data.frame(time, hazard, lower.ci, upper.ci))
 }
 df_surv <- group_by(df, male) %>%
-  do(as.data.frame(bshazard(Surv(exit_age, cigarette_ever) ~ 1, data = ., verbose = F, lambda = 1000))) %>%
+  do(as.data.frame(bshazard(Surv(exit_age, cigarette_ever) ~ 1, data = ., verbose = F, lambda = 100))) %>%
   ungroup()
 ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = male)) +
   geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci, fill = male), alpha = 0.3) +
@@ -250,12 +259,36 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
 
 # Proportional Hazards Model ----------------------------------------------
 
-cox_model <- coxph(Surv(exit_age, cigarette_ever) ~ male + black +
-                     social_media_use + depressed + no_of_cars + own_bedroom + 
-                     school_grades, data = df)
+# Test for proportional hazards
+eha::logrank(Surv(exit_age, cigarette_ever), group = male, df) # Male, not violated
+eha::logrank(Surv(exit_age, cigarette_ever), group = ethnicity, df) # Ethnicity, violated
+eha::logrank(Surv(exit_age, cigarette_ever), group = social_media_use, df) # Social media use, not violated
+eha::logrank(Surv(exit_age, cigarette_ever), group = depressed, df) # Depressed, not violated
+eha::logrank(Surv(exit_age, cigarette_ever), group = no_of_cars, df) # Number of cars, violated
+eha::logrank(Surv(exit_age, cigarette_ever), group = own_bedroom, df) # Own bedroom, violated
+eha::logrank(Surv(exit_age, cigarette_ever), group = school_grades, df) # School grades, violated
+
+# Curves
+fit <- survfit(Surv(exit_age, cigarette_ever) ~ school_grades, df, conf.type = "log-log")
+autoplot(fit)
+
+df_surv <- group_by(df, school_grades) %>%
+  do(as.data.frame(bshazard(Surv(exit_age, cigarette_ever) ~ 1, data = ., verbose = F, lambda = 10))) %>%
+  ungroup()
+ggplot(df_surv, aes(x = time, y = hazard, group = school_grades)) + geom_line(aes(col = school_grades)) +
+  geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci, fill = school_grades), alpha = 0.3)
+
+# Model with all covariates
+cox_model <- coxph(Surv(exit_age, cigarette_ever) ~ male + hispanic + 
+                     native_indian + asian + black + white + social_media_use + 
+                     depressed + no_of_cars + own_bedroom + school_grades, 
+                   data = df)
 
 # Model summary
 summary(cox_model)
+
+# Test for proportional hazards
+cox.zph(cox_model)
 
 
 # Reformat Data for Split Population Model --------------------------------
