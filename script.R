@@ -20,6 +20,9 @@ library(eha)
 library(spduration)
 library(separationplot)
 
+# Tables
+library(gtsummary)
+
 
 # Data Import and Cleaning ------------------------------------------------
 
@@ -38,7 +41,6 @@ library(separationplot)
 #
 # Interesting covariates -
 # QN133: How often you use social media?
-# QN157A, B, C, D: No interest in life, feeling down/depressed/hopeless, etc.
 # QN161: Wealth. Does family own cars?
 # QN162: Wealth. Do you have your own bedroom?
 # QN165: School grades currently.
@@ -49,12 +51,8 @@ library(separationplot)
 
 df <- read_excel("nyts2022.xlsx") %>%
   dplyr::select(c("newid", "QN1", "QN2", "QN4B", "QN4C", "QN4D", "QN4E",
-           "QN5A", "QN5B", "QN5C", "QN5D", "QN5E", "QN133", "QN157A", 
-           "QN157B", "QN157C", "QN157D", "QN161", "QN162", "QN165", "QN35", 
-           "QN36"))
-
-# How many individuals in raw data?
-n_distinct(df$newid) # 28291 individuals
+           "QN5A", "QN5B", "QN5C", "QN5D", "QN5E", "QN133", "QN161", "QN162", 
+           "QN165", "QN35", "QN36"))
 
 
 ## Consolidate some variables ----
@@ -67,19 +65,12 @@ df <- df %>%
 df$hispanic <- as.factor(df$hispanic)
 df <- subset(df, select = -c(QN4B:QN4E))
 
-# Feeling depressed dummy
-df <- df %>% 
-  mutate(depressed = rowSums(!is.na(dplyr::select(., QN157A:QN157D))), .after = QN157D)
-df <- df %>% 
-  mutate(depressed = case_when(depressed == 0 ~ 0, T ~ 1))
-df <- subset(df, select = -c(QN157A:QN157D))
-
 
 ## Rename variables for convenience ----
-names(df) <- c("id", "age", "male", "hispanic", "native_indian", 
-               "asian", "black", "hawaii_pacific", "white", "social_media_use",
-               "depressed", "no_of_cars", "own_bedroom", "school_grades", 
-               "cigarette_ever", "exit_age")
+names(df) <- c("id", "age", "male", "hispanic", "native_indian", "asian", 
+               "black", "hawaii_pacific", "white", "social_media_use", 
+               "no_of_cars", "own_bedroom", "school_grades", "cigarette_ever", 
+               "exit_age")
 
 
 ## Coding actual values of variables from codebook ----
@@ -202,7 +193,10 @@ df <- df %>%
   mutate(ethnicity = ifelse(sum(is.na(value)) == 5, value[!is.na(value)], "Mixed"), .by = id, .after = male) %>% 
   pivot_wider() %>% 
   subset(select = -c(hispanic:white))
-
+df$ethnicity <- factor(df$ethnicity, levels = c("Mixed", "Native Indian", 
+                                                "Asian", "Black", 
+                                                "Hawaii/Pacific", "White",
+                                                "Hispanic"))
 
 
 # Survival Curves ---------------------------------------------------------
@@ -259,36 +253,31 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
 
 # Proportional Hazards Model ----------------------------------------------
 
+# Model stratifying on variables violating proportional hazards
+cox_model_1 <- coxph(Surv(exit_age, cigarette_ever) ~ male + ethnicity + 
+                       social_media_use + no_of_cars + own_bedroom + 
+                       school_grades, data = df)
+
+# Model summary
+summary(cox_model_1)
+
+stargazer::stargazer(cox_model_1)
+
 # Test for proportional hazards
 eha::logrank(Surv(exit_age, cigarette_ever), group = male, df) # Male, not violated
 eha::logrank(Surv(exit_age, cigarette_ever), group = ethnicity, df) # Ethnicity, violated
 eha::logrank(Surv(exit_age, cigarette_ever), group = social_media_use, df) # Social media use, not violated
-eha::logrank(Surv(exit_age, cigarette_ever), group = depressed, df) # Depressed, not violated
 eha::logrank(Surv(exit_age, cigarette_ever), group = no_of_cars, df) # Number of cars, violated
 eha::logrank(Surv(exit_age, cigarette_ever), group = own_bedroom, df) # Own bedroom, violated
 eha::logrank(Surv(exit_age, cigarette_ever), group = school_grades, df) # School grades, violated
 
-# Curves
-fit <- survfit(Surv(exit_age, cigarette_ever) ~ school_grades, df, conf.type = "log-log")
-autoplot(fit)
-
-df_surv <- group_by(df, school_grades) %>%
-  do(as.data.frame(bshazard(Surv(exit_age, cigarette_ever) ~ 1, data = ., verbose = F, lambda = 10))) %>%
-  ungroup()
-ggplot(df_surv, aes(x = time, y = hazard, group = school_grades)) + geom_line(aes(col = school_grades)) +
-  geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci, fill = school_grades), alpha = 0.3)
-
-# Model with all covariates
-cox_model <- coxph(Surv(exit_age, cigarette_ever) ~ male + hispanic + 
-                     native_indian + asian + black + white + social_media_use + 
-                     depressed + no_of_cars + own_bedroom + school_grades, 
-                   data = df)
+# Model stratifying on variables violating proportional hazards
+cox_model_2 <- coxph(Surv(exit_age, cigarette_ever) ~ male + strata(ethnicity) + 
+                     social_media_use + strata(no_of_cars) + 
+                     strata(own_bedroom) + strata(school_grades), data = df)
 
 # Model summary
-summary(cox_model)
-
-# Test for proportional hazards
-cox.zph(cox_model)
+summary(cox_model_2)
 
 
 # Reformat Data for Split Population Model --------------------------------
@@ -318,10 +307,10 @@ df1 <- left_join(df1, dplyr::select(df, id:school_grades), by = "id") # Add all 
 df1$event <- ifelse(df1$exit == df1$age, 0, 1)
 
 # How many people smoke the first time at age of interview?
-nrow(subset(df, age == exit_age & cigarette_ever == 1)) # 314 individuals
+nrow(subset(df, age == exit_age & cigarette_ever == 1)) # 288 individuals
 id_vector <- subset(df, age == exit_age & cigarette_ever == 1) %>% 
   distinct(id) %>% 
-  pull() # Get the id's of these 314 individuals
+  pull() # Get the id's of these 288 individuals
 df1 <- df1 %>% 
   mutate(event = case_when(id %in% id_vector ~ 1, T ~ event)) 
 
@@ -352,21 +341,60 @@ b <- sample(a, n_distinct(a) / 3)
 df_train <- subset(df_model, id %in% b) # Training sample
 df_test <- subset(df_model, !(id %in% b)) # Test sample
 
-# Log-log model
-loglog_model <- spdur(
-  duration ~ male + black + social_media_use + no_of_cars + school_grades,
-  atrisk ~ male + black + social_media_use + no_of_cars + school_grades,
+# Count of smokers
+count(df_train, event)
+
+
+## Log-log model specification 1: All covariates ----
+loglog_model_1 <- spdur(
+  duration ~ male + ethnicity + social_media_use + no_of_cars + own_bedroom + school_grades,
+  atrisk ~ male + ethnicity + social_media_use + no_of_cars + own_bedroom + school_grades,
   data = df_train, distr = "loglog", silent = T)
-
-# Model summary
-summary(loglog_model)
-
-# Hazard plot
-plot(loglog_model, type = "hazard", main = "Loglog")
+summary(loglog_model_1) # Model summary
+plot(loglog_model_1, type = "hazard", main = "Loglog", ci = F) # Hazard plot
 
 # Prediction on test sample
-loglog_test_p <- predict(loglog_model, newdata = df_test, na.action = na.omit)
+loglog_test_p <- predict(loglog_model_1, newdata = df_test, na.action = na.omit)
 
 # Separation plot
 obs_y <- df_test[complete.cases(df_test), "event"]
 separationplot(loglog_test_p, obs_y, newplot = F)
+
+
+## Log-log model specification 2: Conservative ----
+loglog_model_2 <- spdur(
+  duration ~ male + ethnicity,
+  atrisk ~ male + ethnicity,
+  data = df_train, distr = "loglog", silent = T)
+summary(loglog_model_2)
+plot(loglog_model_2, type = "hazard", main = "Loglog", ci = F)
+
+# Prediction on test sample
+loglog_test_p <- predict(loglog_model_2, newdata = df_test, na.action = na.omit)
+
+# Separation plot
+obs_y <- df_test[complete.cases(df_test), "event"]
+separationplot(loglog_test_p, obs_y, newplot = F)
+
+
+# Summary Statistics ------------------------------------------------------
+
+# Full population
+as_kable(tbl_summary(df[, 2:11], 
+                     statistic = list(all_continuous() ~ "{mean} ({min}, {max})", 
+                                      all_categorical() ~ "{n} ({p}%)")), format = "latex")
+df %>% filter(cigarette_ever == 1) %>% select(exit_age) %>% summary() # Conditional exit age
+
+# Test sample
+as_kable(tbl_summary(subset(df, id %in% a)[, 2:11], 
+         statistic = list(all_continuous() ~ "{mean} ({min}, {max})", 
+                          all_categorical() ~ "{n} ({p}%)")), format = "latex")
+subset(df, id %in% a) %>% filter(cigarette_ever == 1) %>% select(exit_age) %>% summary() # Conditional exit age
+
+
+
+
+
+
+
+
