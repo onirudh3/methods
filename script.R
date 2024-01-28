@@ -22,6 +22,8 @@ library(separationplot)
 
 # Tables
 library(gtsummary)
+library(stargazer)
+library(xtable)
 
 
 # Data Import and Cleaning ------------------------------------------------
@@ -253,15 +255,14 @@ ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = m
 
 # Proportional Hazards Model ----------------------------------------------
 
-# Model stratifying on variables violating proportional hazards
+# Model with all covariates
 cox_model_1 <- coxph(Surv(exit_age, cigarette_ever) ~ male + ethnicity + 
                        social_media_use + no_of_cars + own_bedroom + 
                        school_grades, data = df)
 
 # Model summary
 summary(cox_model_1)
-
-stargazer::stargazer(cox_model_1)
+stargazer(cox_model_1) # Latex table
 
 # Test for proportional hazards
 eha::logrank(Surv(exit_age, cigarette_ever), group = male, df) # Male, not violated
@@ -278,6 +279,7 @@ cox_model_2 <- coxph(Surv(exit_age, cigarette_ever) ~ male + strata(ethnicity) +
 
 # Model summary
 summary(cox_model_2)
+stargazer(cox_model_2) # Latex table
 
 
 # Reformat Data for Split Population Model --------------------------------
@@ -341,9 +343,6 @@ b <- sample(a, n_distinct(a) / 3)
 df_train <- subset(df_model, id %in% b) # Training sample
 df_test <- subset(df_model, !(id %in% b)) # Test sample
 
-# Count of smokers
-count(df_train, event)
-
 
 ## Log-log model specification 1: All covariates ----
 loglog_model_1 <- spdur(
@@ -351,7 +350,10 @@ loglog_model_1 <- spdur(
   atrisk ~ male + ethnicity + social_media_use + no_of_cars + own_bedroom + school_grades,
   data = df_train, distr = "loglog", silent = T)
 summary(loglog_model_1) # Model summary
-plot(loglog_model_1, type = "hazard", main = "Loglog", ci = F) # Hazard plot
+plot(loglog_model_1, type = "hazard", main = "", ci = F) # Hazard plot
+
+# Latex table
+print(xtable(loglog_model_1), type = "latex", comment = F, include.rownames = F)
 
 # Prediction on test sample
 loglog_test_p <- predict(loglog_model_1, newdata = df_test, na.action = na.omit)
@@ -367,7 +369,10 @@ loglog_model_2 <- spdur(
   atrisk ~ male + ethnicity,
   data = df_train, distr = "loglog", silent = T)
 summary(loglog_model_2)
-plot(loglog_model_2, type = "hazard", main = "Loglog", ci = F)
+plot(loglog_model_2, type = "hazard", ci = F)
+
+# Latex table
+print(xtable(loglog_model_2), type = "latex", comment = F, include.rownames = F)
 
 # Prediction on test sample
 loglog_test_p <- predict(loglog_model_2, newdata = df_test, na.action = na.omit)
