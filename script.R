@@ -208,7 +208,7 @@ df$ethnicity <- factor(df$ethnicity, levels = c("Mixed", "Native Indian",
 # Survival curve
 fit <- survfit(Surv(exit_age, cigarette_ever) ~ 1, df, conf.type = "log-log")
 autoplot(fit, censor.shape = '|', censor.colour = "orange2", surv.colour = "pink3") +
-  theme_classic(base_size = 14) +
+  theme_classic(base_size = 20) +
   xlab("Age in Years") +
   ylab("Percentage Never Smoked Cigarette") +
   scale_x_continuous(breaks = seq(0, 50, 1), expand = c(0, 0), limits = c(0, 20))
@@ -217,7 +217,7 @@ autoplot(fit, censor.shape = '|', censor.colour = "orange2", surv.colour = "pink
 fit <- survfit(Surv(exit_age, cigarette_ever) ~ male, df, conf.type = "log-log")
 autoplot(fit) +
   scale_color_hue(labels = c("Female", "Male")) +
-  theme_classic(base_size = 14) +
+  theme_classic(base_size = 20) +
   guides(fill = "none") +
   theme(legend.position = c(0.2, 0.3)) +
   labs(color = "", x = "Age in Years", y = "Percentage Never Smoked Cigarette") +
@@ -231,7 +231,7 @@ ggplot(df_surv, aes(time, hazard)) +
   geom_line(color = "purple") +
   geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci), alpha = 0.2,
               fill = "pink3") +
-  theme_classic(base_size = 14) +
+  theme_classic(base_size = 20) +
   xlab("Age in Years") +
   ylab("Hazard") +
   scale_x_continuous(breaks = seq(0, 20, 1), expand = c(0, 0), limits = c(0, 20)) +
@@ -247,7 +247,7 @@ df_surv <- group_by(df, male) %>%
 ggplot(df_surv, aes(x = time, y = hazard, group = male)) + geom_line(aes(col = male)) +
   geom_ribbon(aes(ymin = lower.ci, ymax = upper.ci, fill = male), alpha = 0.3) +
   labs(color = "", x = "Age in Years", y = "Hazard") +
-  theme_classic(base_size = 14) +
+  theme_classic(base_size = 20) +
   scale_color_hue(labels = c("Female", "Male")) +
   guides(fill = "none") +
   theme(legend.position = c(0.2, 0.9)) +
