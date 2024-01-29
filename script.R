@@ -56,6 +56,8 @@ df <- read_excel("nyts2022.xlsx") %>%
            "QN5A", "QN5B", "QN5C", "QN5D", "QN5E", "QN133", "QN161", "QN162", 
            "QN165", "QN35", "QN36"))
 
+# How many individuals?
+n_distinct(df$newid) # 28291 individuals
 
 ## Consolidate some variables ----
 
