@@ -210,17 +210,14 @@ df$ethnicity <- factor(df$ethnicity, levels = c("Mixed", "Native Indian",
 
 # Survival curve
 fit <- survfit(Surv(exit_age, cigarette_ever) ~ 1, df, conf.type = "log-log")
-pdf("Plots/survival_global.pdf", height = 6, width = 8)
 autoplot(fit, censor.shape = '+', censor.colour = "black", surv.colour = "pink3") +
   theme_classic(base_size = 20) +
   xlab("Age in Years") +
   ylab("Survival function") +
   scale_x_continuous(breaks = seq(0, 50, 1), expand = c(0, 0), limits = c(0, 20))
-dev.off()
 
 # Survival by sex
 fit <- survfit(Surv(exit_age, cigarette_ever) ~ male, df, conf.type = "log-log")
-pdf("Plots/survival_by_sex.pdf", height = 6, width = 8)
 autoplot(fit) +
   scale_color_hue(labels = c("Female", "Male")) +
   theme_classic(base_size = 20) +
@@ -228,7 +225,6 @@ autoplot(fit) +
   theme(legend.position = c(0.2, 0.3)) +
   labs(color = "", x = "Age in Years", y = "Survival function") +
   scale_x_continuous(breaks = seq(0, 50, 1), expand = c(0, 0), limits = c(0, 20))
-dev.off()
 
 # Smoothed hazard curve (change smoothing parameter lambda as per convenience)
 fit <- bshazard(Surv(exit_age, cigarette_ever) ~ 1, verbose = F, lambda = 100, df)
