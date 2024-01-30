@@ -20,6 +20,9 @@ library(eha)
 library(spduration)
 library(separationplot)
 
+# False discovery rate (FDR)
+library(FDRestimation)
+
 # Tables
 library(gtsummary)
 library(stargazer)
@@ -264,6 +267,7 @@ cox_model_1 <- coxph(Surv(exit_age, cigarette_ever) ~ male + ethnicity +
 
 # Model summary
 summary(cox_model_1)
+p.fdr(data.frame(summary(cox_model_1)[["coefficients"]])$Pr...z..) # FDR
 stargazer(cox_model_1) # Latex table
 
 # Test for proportional hazards
@@ -281,6 +285,7 @@ cox_model_2 <- coxph(Surv(exit_age, cigarette_ever) ~ male + strata(ethnicity) +
 
 # Model summary
 summary(cox_model_2)
+p.fdr(data.frame(summary(cox_model_2)[["coefficients"]])$Pr...z..) # FDR
 stargazer(cox_model_2) # Latex table
 
 
@@ -351,8 +356,14 @@ loglog_model_1 <- spdur(
   duration ~ male + ethnicity + social_media_use + no_of_cars + own_bedroom + school_grades,
   atrisk ~ male + ethnicity + social_media_use + no_of_cars + own_bedroom + school_grades,
   data = df_train, distr = "loglog", silent = T)
-summary(loglog_model_1) # Model summary
-plot(loglog_model_1, type = "hazard", main = "", ci = F) # Hazard plot
+
+# Model summary
+summary(loglog_model_1)
+p.fdr(loglog_model_1$pval, threshold = 0.05) # FDR
+AIC(loglog_model_1) # AIC = 616.31
+
+# Hazard plot
+plot(loglog_model_1, type = "hazard", ci = F)
 
 # Latex table
 print(xtable(loglog_model_1), type = "latex", comment = F, include.rownames = F)
@@ -370,7 +381,13 @@ loglog_model_2 <- spdur(
   duration ~ male + ethnicity,
   atrisk ~ male + ethnicity,
   data = df_train, distr = "loglog", silent = T)
+
+# Model summary
 summary(loglog_model_2)
+p.fdr(data.frame(loglog_model_2)[-1, ]$Pr...t.., threshold = 0.05) # FDR
+AIC(loglog_model_2) # AIC = 649.81
+
+# Hazard plot
 plot(loglog_model_2, type = "hazard", ci = F)
 
 # Latex table
@@ -397,11 +414,4 @@ as_kable(tbl_summary(subset(df, id %in% a)[, 2:11],
          statistic = list(all_continuous() ~ "{mean} ({min}, {max})", 
                           all_categorical() ~ "{n} ({p}%)")), format = "latex")
 subset(df, id %in% a) %>% filter(cigarette_ever == 1) %>% select(exit_age) %>% summary() # Conditional exit age
-
-
-
-
-
-
-
 
